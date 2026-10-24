@@ -15,7 +15,31 @@
 //    has an input device.
 #import <Foundation/Foundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#if __has_include(<CoreAudio/AudioHardwareBase.h>)
 #import <CoreAudio/AudioHardwareBase.h>
+#else
+typedef UInt32 AudioObjectID;
+typedef UInt32 AudioObjectPropertySelector;
+typedef UInt32 AudioObjectPropertyScope;
+typedef UInt32 AudioObjectPropertyElement;
+
+struct AudioObjectPropertyAddress {
+  AudioObjectPropertySelector mSelector;
+  AudioObjectPropertyScope    mScope;
+  AudioObjectPropertyElement  mElement;
+};
+typedef struct AudioObjectPropertyAddress AudioObjectPropertyAddress;
+
+enum {
+  kAudioObjectPropertyScopeGlobal = 'glob',
+  kAudioObjectPropertyScopeInput  = 'inpt',
+  kAudioObjectPropertyScopeOutput = 'outp',
+  kAudioObjectPropertyElementMain = 0,
+  kAudioDevicePropertyStreams     = 'stm#',
+  kAudioDevicePropertyNominalSampleRate = 'nsrt',
+  kAudioStreamPropertyVirtualFormat     = 'sfmt',
+};
+#endif
 #include <dlfcn.h>
 #include <mach/mach.h>
 #include <objc/runtime.h>
