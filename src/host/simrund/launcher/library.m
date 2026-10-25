@@ -171,6 +171,20 @@ static uint32_t Arm64Platform(NSString *path, uint32_t *minos, BOOL *encrypted) 
     return nil;
   }
 
+  // Ensure directories and main executable have execute permissions
+  NSDirectoryEnumerator *de = [fm enumeratorAtPath:destApp];
+  for (NSString *rel in de) {
+    NSString *p = [destApp stringByAppendingPathComponent:rel];
+    if ([de.fileAttributes.fileType isEqualToString:NSFileTypeDirectory]) {
+      chmod(p.fileSystemRepresentation, 0755);
+    }
+  }
+  NSDictionary *appInfo = [NSDictionary dictionaryWithContentsOfFile:[destApp stringByAppendingPathComponent:@"Info.plist"]];
+  NSString *appExe = appInfo[@"CFBundleExecutable"];
+  if ([appExe isKindOfClass:NSString.class]) {
+    chmod([destApp stringByAppendingPathComponent:appExe].fileSystemRepresentation, 0755);
+  }
+
   [fm removeItemAtPath:work error:nil];
   [expectedStamp writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
   return destApp;

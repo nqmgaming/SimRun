@@ -19,7 +19,7 @@
 #include <sys/xattr.h>
 
 // Part of the stamp: a change here converts every app again.
-static const int kConverterVersion = 3;
+static const int kConverterVersion = 4;
 
 // ---------------------------------------------------------------- Mach-O
 static BOOL IsMachO(NSString *path) {
@@ -132,7 +132,7 @@ static BOOL ConvertMachO(NSString *path, BOOL *needsMetricKitShim, NSString **er
   if (!changed) return YES;
 
   struct stat st;
-  mode_t mode = stat(path.fileSystemRepresentation, &st) == 0 ? st.st_mode & 07777 : 0755;
+  mode_t mode = stat(path.fileSystemRepresentation, &st) == 0 ? ((st.st_mode & 07777) | 0755) : 0755;
   if (![d writeToFile:path atomically:YES]) {
     *error = [NSString stringWithFormat:@"couldn't write %@", path];
     return NO;
@@ -278,6 +278,7 @@ static NSString *CacheDirectory(NSString *app) {
     if (!IsMachO(path)) continue;
     if (!ConvertMachO(path, &needsMetricKitShim, error)) return nil;
     [machOs addObject:path];
+    chmod(path.fileSystemRepresentation, 0755);
   }
   removexattr(out.fileSystemRepresentation, "com.apple.quarantine", XATTR_NOFOLLOW);
 
@@ -298,7 +299,11 @@ static NSString *CacheDirectory(NSString *app) {
   NSMutableSet<NSString *> *executables = [NSMutableSet set];
   for (NSString *b in bundles) {
     id exe = [NSDictionary dictionaryWithContentsOfFile:[b stringByAppendingPathComponent:@"Info.plist"]][@"CFBundleExecutable"];
-    if ([exe isKindOfClass:NSString.class]) [executables addObject:[b stringByAppendingPathComponent:exe]];
+    if ([exe isKindOfClass:NSString.class]) {
+      NSString *exePath = [b stringByAppendingPathComponent:exe];
+      [executables addObject:exePath];
+      chmod(exePath.fileSystemRepresentation, 0755);
+    }
   }
   NSMutableArray<NSArray<NSString *> *> *levels = [NSMutableArray array];
   [levels addObject:[machOs filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *p, id b) { return ![executables containsObject:p]; }]]];
