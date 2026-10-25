@@ -25,6 +25,13 @@
 			<key>LSHandlerRank</key><string>Alternate</string>
 			<key>LSItemContentTypes</key><array><string>com.apple.application-bundle</string></array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>iOS App Package</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Alternate</string>
+			<key>LSItemContentTypes</key><array><string>com.apple.itunes.ipa</string><string>public.archive</string></array>
+			<key>CFBundleTypeExtensions</key><array><string>ipa</string></array>
+		</dict>
 	</array>
 </dict>
 </plist>

@@ -1040,6 +1040,10 @@ static void SendReply(int c, NSDictionary *reply, dispatch_block_t then) {
   NSString *target = argv.firstObject;
   if (!target.absolutePath) target = [r.cwd stringByAppendingPathComponent:target];
   target = target.stringByStandardizingPath;
+  NSString *ipaErr = nil;
+  NSString *resolved = [SRAppInfo resolvedAppPathFromPath:target error:&ipaErr];
+  if (!resolved && ipaErr) return ipaErr;
+  if (resolved) target = resolved;
   BOOL dir = NO;
   if (![NSFileManager.defaultManager fileExistsAtPath:target isDirectory:&dir]) return [NSString stringWithFormat:@"No such file: %@", target];
   NSString *exe = target;

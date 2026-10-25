@@ -2,10 +2,12 @@
 #import "library.h"
 #import "session/environment.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <mach-o/loader.h>
 #include <mach-o/fat.h>
 #include <pwd.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
 
 // IconServices (private): the icon pipeline SpringBoard itself renders home-screen icons with (macOS ships the same
 // framework). It reads the bundle's icon (asset catalog incl. Icon Composer layer stacks, or CFBundleIconFiles PNGs) and
@@ -69,6 +71,110 @@ static uint32_t Arm64Platform(NSString *path, uint32_t *minos, BOOL *encrypted) 
 }
 
 @implementation SRAppInfo
+
++ (NSString *)resolvedAppPathFromPath:(NSString *)path error:(NSString **)error {
+  if (![path.pathExtension.lowercaseString isEqualToString:@"ipa"]) return path;
+
+  BOOL isDir = NO;
+  if (![NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDir] || isDir) {
+    if (error) *error = @"IPA file does not exist or is a directory.";
+    return nil;
+  }
+
+  struct stat st;
+  if (stat(path.fileSystemRepresentation, &st) != 0) {
+    if (error) *error = [NSString stringWithFormat:@"Cannot read IPA: %s", strerror(errno)];
+    return nil;
+  }
+
+  unsigned char md[CC_SHA256_DIGEST_LENGTH];
+  NSData *pData = [path dataUsingEncoding:NSUTF8StringEncoding];
+  CC_SHA256(pData.bytes, (CC_LONG)pData.length, md);
+
+  NSString *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+  NSString *baseDir = [caches stringByAppendingFormat:@"/%@/ExtractedIPAs/%@-%02x%02x%02x%02x",
+                       NSBundle.mainBundle.bundleIdentifier ?: @"dev.simrun.SimRun",
+                       path.lastPathComponent.stringByDeletingPathExtension,
+                       md[0], md[1], md[2], md[3]];
+
+  NSString *stampPath = [baseDir stringByAppendingPathComponent:@"stamp"];
+  NSString *expectedStamp = [NSString stringWithFormat:@"%lld %ld.%09ld",
+                             (long long)st.st_size, st.st_mtimespec.tv_sec, st.st_mtimespec.tv_nsec];
+
+  NSFileManager *fm = NSFileManager.defaultManager;
+  NSString *cachedStamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
+
+  if ([cachedStamp isEqualToString:expectedStamp]) {
+    for (NSString *sub in [fm contentsOfDirectoryAtPath:baseDir error:nil]) {
+      if ([sub.pathExtension.lowercaseString isEqualToString:@"app"]) {
+        return [baseDir stringByAppendingPathComponent:sub];
+      }
+    }
+  }
+
+  NSString *work = [baseDir stringByAppendingPathComponent:@"work"];
+  [fm removeItemAtPath:baseDir error:nil];
+  if (![fm createDirectoryAtPath:work withIntermediateDirectories:YES attributes:nil error:nil]) {
+    if (error) *error = [NSString stringWithFormat:@"Cannot create cache directory %@", work];
+    return nil;
+  }
+
+  NSTask *task = [NSTask new];
+  task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/ditto"];
+  task.arguments = @[ @"-x", @"-k", path, work ];
+  NSPipe *errPipe = [NSPipe pipe];
+  task.standardError = errPipe;
+  task.standardOutput = NSFileHandle.fileHandleWithNullDevice;
+  NSError *launchErr = nil;
+  if (![task launchAndReturnError:&launchErr]) {
+    if (error) *error = launchErr.localizedDescription;
+    [fm removeItemAtPath:baseDir error:nil];
+    return nil;
+  }
+  [task waitUntilExit];
+  if (task.terminationStatus != 0) {
+    NSData *errData = [errPipe.fileHandleForReading readDataToEndOfFile];
+    NSString *errMsg = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
+    if (error) *error = [NSString stringWithFormat:@"Failed to extract IPA: %@", errMsg.length ? errMsg : @"unknown error"];
+    [fm removeItemAtPath:baseDir error:nil];
+    return nil;
+  }
+
+  NSString *payload = [work stringByAppendingPathComponent:@"Payload"];
+  NSString *appFound = nil;
+  for (NSString *sub in [fm contentsOfDirectoryAtPath:payload error:nil]) {
+    if ([sub.pathExtension.lowercaseString isEqualToString:@"app"]) {
+      appFound = [payload stringByAppendingPathComponent:sub];
+      break;
+    }
+  }
+
+  if (!appFound) {
+    for (NSString *sub in [fm contentsOfDirectoryAtPath:work error:nil]) {
+      if ([sub.pathExtension.lowercaseString isEqualToString:@"app"]) {
+        appFound = [work stringByAppendingPathComponent:sub];
+        break;
+      }
+    }
+  }
+
+  if (!appFound) {
+    if (error) *error = @"The IPA file does not contain a Payload/*.app bundle.";
+    [fm removeItemAtPath:baseDir error:nil];
+    return nil;
+  }
+
+  NSString *destApp = [baseDir stringByAppendingPathComponent:appFound.lastPathComponent];
+  if (![fm moveItemAtPath:appFound toPath:destApp error:nil]) {
+    if (error) *error = @"Failed to finalize extracted .app bundle.";
+    [fm removeItemAtPath:baseDir error:nil];
+    return nil;
+  }
+
+  [fm removeItemAtPath:work error:nil];
+  [expectedStamp writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+  return destApp;
+}
 
 + (NSString *)problemWithAppAtPath:(NSString *)path {
   if (![path.pathExtension isEqualToString:@"app"]) return @"Not an app bundle.";

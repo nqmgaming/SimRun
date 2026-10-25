@@ -236,7 +236,13 @@ static NSImage *Symbol(NSString *name, NSString *description) {
 - (void)openPaths:(NSArray<NSString *> *)paths {
   NSMutableArray *problems = [NSMutableArray array];
   SRAppInfo *last = nil;
-  for (NSString *p in paths) {
+  for (NSString *raw in paths) {
+    NSString *err = nil;
+    NSString *p = [SRAppInfo resolvedAppPathFromPath:raw error:&err];
+    if (!p) {
+      [problems addObject:[NSString stringWithFormat:@"%@: %@", raw.lastPathComponent, err ?: @"Cannot open"]];
+      continue;
+    }
     NSString *why = [SRAppInfo problemWithAppAtPath:p];
     if (why) { [problems addObject:[NSString stringWithFormat:@"%@: %@", p.lastPathComponent, why]]; continue; }
     last = [SRLibrary.shared addPath:p];
@@ -256,9 +262,12 @@ static NSImage *Symbol(NSString *name, NSString *description) {
 - (void)addAppWithPanel {
   [self show];
   NSOpenPanel *p = [NSOpenPanel openPanel];
-  p.allowedContentTypes = @[ UTTypeApplicationBundle ]; p.allowsMultipleSelection = YES; p.treatsFilePackagesAsDirectories = NO;
-  p.message = @"Choose app bundles built for an iOS or watchOS Simulator destination, or iOS apps built for devices (not from "
-               "the App Store).";
+  NSMutableArray *types = [NSMutableArray arrayWithObject:UTTypeApplicationBundle];
+  UTType *ipaType = [UTType typeWithFilenameExtension:@"ipa"];
+  if (ipaType) [types addObject:ipaType];
+  p.allowedContentTypes = types;
+  p.allowsMultipleSelection = YES; p.treatsFilePackagesAsDirectories = NO;
+  p.message = @"Choose app bundles (.app) or decrypted package files (.ipa) built for iOS.";
   [p beginSheetModalForWindow:_window completionHandler:^(NSModalResponse r) {
     if (r != NSModalResponseOK) return;
     NSMutableArray *paths = [NSMutableArray array]; for (NSURL *u in p.URLs) [paths addObject:u.path];

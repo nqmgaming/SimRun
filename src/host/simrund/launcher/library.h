@@ -12,6 +12,8 @@
 // nil if `path` is an arm64 iOS- or watchOS-Simulator app bundle, or a device build SimRun can convert; otherwise why
 // it can't be launched.
 + (NSString *)problemWithAppAtPath:(NSString *)path;
+// If `path` is an .ipa, extracts it to the cache directory and returns the path to its .app bundle.
++ (NSString *)resolvedAppPathFromPath:(NSString *)path error:(NSString **)error;
 + (instancetype)infoWithPath:(NSString *)path;
 // The minimum OS version an executable's arm64 slice was built for ("26.0"), as dyld enforces it; nil if unknown.
 + (NSString *)minimumOSVersionOfExecutable:(NSString *)path;
