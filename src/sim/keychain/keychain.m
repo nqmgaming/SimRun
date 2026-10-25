@@ -49,6 +49,22 @@ static NSDictionary *read_entitlements(void) {
       if (blob && csops(getpid(), CS_OPS_ENTITLEMENTS_BLOB, blob.mutableBytes, len) == 0) xml = [blob subdataWithRange:NSMakeRange(8, len - 8)];
     }
   }
+  if (!xml) {
+    NSBundle *b = NSBundle.mainBundle;
+    for (NSString *name in @[ @"embedded.entitlements", @"archived-expanded-entitlements.xcent", @"cyan.entitlements", @"Entitlements.plist" ]) {
+      NSString *path = [b pathForResource:name ofType:nil];
+      if (path && (xml = [NSData dataWithContentsOfFile:path])) break;
+    }
+    if (!xml && b.bundlePath) {
+      NSArray *files = [NSFileManager.defaultManager contentsOfDirectoryAtPath:b.bundlePath error:nil];
+      for (NSString *f in files) {
+        if ([f.pathExtension isEqualToString:@"entitlements"]) {
+          xml = [NSData dataWithContentsOfFile:[b.bundlePath stringByAppendingPathComponent:f]];
+          if (xml) break;
+        }
+      }
+    }
+  }
   id e = xml ? [NSPropertyListSerialization propertyListWithData:xml options:0 format:NULL error:NULL] : nil;
   return [e isKindOfClass:NSDictionary.class] ? e : nil;
 }
@@ -65,6 +81,7 @@ static void setup_groups(void) {
   add(e[@"com.apple.security.application-groups"]);
   gCreator = NSBundle.mainBundle.bundleIdentifier ?: @(getprogname());
   if (!g.count) [g addObject:gCreator];
+  else if (![g containsObject:gCreator]) [g addObject:gCreator];
   gGroups = g.array;
 }
 
@@ -230,7 +247,7 @@ static BOOL item_matches(NSDictionary *item, NSDictionary *q, NSDictionary *attr
     if (!attr_equal(a[k], attrs[k])) return NO;
   }
   id g = q[(id)kSecAttrAccessGroup];
-  if ([g isKindOfClass:NSString.class] ? ![a[@"agrp"] isEqual:g] : ![gGroups containsObject:a[@"agrp"] ?: @""]) return NO;
+  if ([g isKindOfClass:NSString.class] ? ![a[@"agrp"] isEqual:g] : (![gGroups containsObject:a[@"agrp"] ?: @""] && ![item[@"creator"] isEqual:gCreator])) return NO;
   id s = q[(id)kSecAttrSynchronizable];   // unset: only items that don't sync (as on iOS)
   if (![s isEqual:(id)kSecAttrSynchronizableAny] && truthy(s) != truthy(a[@"sync"])) return NO;
   return YES;

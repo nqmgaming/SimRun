@@ -19,7 +19,7 @@
 #include <sys/xattr.h>
 
 // Part of the stamp: a change here converts every app again.
-static const int kConverterVersion = 2;
+static const int kConverterVersion = 3;
 
 // ---------------------------------------------------------------- Mach-O
 static BOOL IsMachO(NSString *path) {
@@ -245,6 +245,20 @@ static NSString *CacheDirectory(NSString *app) {
     return nil;
   }
   [fm removeItemAtPath:[out stringByAppendingPathComponent:@"Watch"] error:nil];
+
+  // Extract original entitlements before stripping device signatures so keychain & sandbox can read access groups
+  NSTask *entTask = [NSTask new];
+  entTask.executableURL = [NSURL fileURLWithPath:@"/usr/bin/codesign"];
+  entTask.arguments = @[ @"-d", @"--entitlements", @":-", app ];
+  NSPipe *entPipe = [NSPipe pipe];
+  entTask.standardOutput = entPipe; entTask.standardError = NSFileHandle.fileHandleWithNullDevice;
+  if ([entTask launchAndReturnError:nil]) {
+    NSData *entData = [entPipe.fileHandleForReading readDataToEndOfFile];
+    [entTask waitUntilExit];
+    if (entTask.terminationStatus == 0 && entData.length > 0) {
+      [entData writeToFile:[out stringByAppendingPathComponent:@"embedded.entitlements"] atomically:YES];
+    }
+  }
 
   // one walk: drop the device signatures, convert Info.plists and Mach-Os, and note what to sign
   NSMutableArray<NSString *> *machOs = [NSMutableArray array], *bundles = [NSMutableArray arrayWithObject:out];
