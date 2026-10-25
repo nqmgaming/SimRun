@@ -35,7 +35,7 @@ HDRS    := $(wildcard include/*.h)
 
 APP   := $(BUILD)/SimRun.app
 CORE  := $(APP) $(BIN)/simrun
-SIMLIBS := $(LIB)/xpcservices.dylib $(LIB)/app.dylib $(LIB)/SimFramebuffer $(LIB)/photos.dylib
+SIMLIBS := $(LIB)/xpcservices.dylib $(LIB)/app.dylib $(LIB)/SimFramebuffer $(LIB)/photos.dylib $(LIB)/MetricKitShim.dylib
 WATCHLIB := $(LIB)/watchos
 WATCHLIBS := $(WATCHLIB)/simns $(WATCHLIB)/xpcservices.dylib $(WATCHLIB)/app.dylib $(WATCHLIB)/SimFramebuffer
 PARTS := $(BIN)/simrund $(BIN)/simrun $(BIN)/simns $(SIMLIBS) $(WATCHLIBS)
@@ -176,6 +176,10 @@ $(LIB)/photos.dylib: src/sim/photos/photos.m src/sim/tcc/tcc.tbd $(COMMON_DEPS) 
 $(LIB)/SimFramebuffer: src/sim/simfb/simfb.m $(HDRS) | $(LIB)
 	$(SIMCC) -dynamiclib $< -framework Foundation -framework IOSurface -framework CoreFoundation -framework CoreGraphics -framework Metal \
 	  -install_name @rpath/SimFramebuffer.framework/SimFramebuffer -o $@
+	@$(SIGN) $@ 2>/dev/null
+
+$(LIB)/MetricKitShim.dylib: src/sim/metrickit/metrickit.c $(HDRS) | $(LIB)
+	$(SIMCC) -dynamiclib $< -Wl,-reexport_framework,MetricKit -install_name @rpath/MetricKitShim.dylib -o $@
 	@$(SIGN) $@ 2>/dev/null
 
 # app.dylib: the modules SimRun puts in the app (src/sim/app/app.h), one folder each; script/'s JS modules (js/*.js)

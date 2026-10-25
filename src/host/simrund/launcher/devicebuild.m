@@ -10,6 +10,7 @@
 //   * Watch/ (the watchOS companion app) is left out
 // App Store builds are encrypted (FairPlay) and can't be converted.
 #import "devicebuild.h"
+#import "session/environment.h"
 #include <CommonCrypto/CommonDigest.h>
 #include <copyfile.h>
 #include <mach-o/fat.h>
@@ -18,7 +19,7 @@
 #include <sys/xattr.h>
 
 // Part of the stamp: a change here converts every app again.
-static const int kConverterVersion = 1;
+static const int kConverterVersion = 2;
 
 // ---------------------------------------------------------------- Mach-O
 static BOOL IsMachO(NSString *path) {
@@ -51,7 +52,7 @@ static NSData *Arm64Slice(NSData *d) {
 
 // Makes the Mach-O at `path` a simulator one, in place. Files that aren't arm64 iOS code stay as they are. NO and
 // *error if it can't.
-static BOOL ConvertMachO(NSString *path, NSString **error) {
+static BOOL ConvertMachO(NSString *path, BOOL *needsMetricKitShim, NSString **error) {
   NSData *file = [NSData dataWithContentsOfFile:path];
   if (file.length < sizeof(struct mach_header_64)) return YES;
   NSData *slice = Arm64Slice(file);
@@ -76,6 +77,24 @@ static BOOL ConvertMachO(NSString *path, NSString **error) {
                                            "enterprise builds (and Xcode's builds for a device), not ones from the App Store.",
                                            path.lastPathComponent];
       return NO;
+    }
+    if (c->cmd == LC_LOAD_DYLIB || c->cmd == LC_LOAD_WEAK_DYLIB) {
+      struct dylib_command *dc = (void *)c;
+      if (dc->dylib.name.offset < c->cmdsize) {
+        char *name = (char *)c + dc->dylib.name.offset;
+        const char *mk = "/System/Library/Frameworks/MetricKit.framework/MetricKit";
+        if (!strcmp(name, mk)) {
+          const char *shim = "@rpath/MetricKitShim.dylib";
+          size_t origLen = strlen(mk);
+          size_t shimLen = strlen(shim);
+          if (shimLen <= origLen) {
+            memcpy(name, shim, shimLen);
+            memset(name + shimLen, 0, origLen - shimLen);
+            changed = YES;
+            if (needsMetricKitShim) *needsMetricKitShim = YES;
+          }
+        }
+      }
     }
     if (c->cmd == LC_BUILD_VERSION) {
       struct build_version_command *bv = (void *)c;
@@ -229,6 +248,7 @@ static NSString *CacheDirectory(NSString *app) {
 
   // one walk: drop the device signatures, convert Info.plists and Mach-Os, and note what to sign
   NSMutableArray<NSString *> *machOs = [NSMutableArray array], *bundles = [NSMutableArray arrayWithObject:out];
+  BOOL needsMetricKitShim = NO;
   NSDirectoryEnumerator *e = [fm enumeratorAtPath:out];
   for (NSString *rel in e) {
     NSString *path = [out stringByAppendingPathComponent:rel], *name = rel.lastPathComponent;
@@ -242,10 +262,22 @@ static NSString *CacheDirectory(NSString *app) {
     if ([name isEqualToString:@"embedded.mobileprovision"]) { [fm removeItemAtPath:path error:nil]; continue; }
     if ([name isEqualToString:@"Info.plist"]) { ConvertInfoPlist(path); continue; }
     if (!IsMachO(path)) continue;
-    if (!ConvertMachO(path, error)) return nil;
+    if (!ConvertMachO(path, &needsMetricKitShim, error)) return nil;
     [machOs addObject:path];
   }
   removexattr(out.fileSystemRepresentation, "com.apple.quarantine", XATTR_NOFOLLOW);
+
+  if (needsMetricKitShim) {
+    NSString *srcShim = [[SREnvironment libraryDirectory] stringByAppendingPathComponent:@"MetricKitShim.dylib"];
+    NSString *fwDir = [out stringByAppendingPathComponent:@"Frameworks"];
+    [fm createDirectoryAtPath:fwDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *dstShim = [fwDir stringByAppendingPathComponent:@"MetricKitShim.dylib"];
+    if ([fm fileExistsAtPath:srcShim]) {
+      [fm removeItemAtPath:dstShim error:nil];
+      [fm copyItemAtPath:srcShim toPath:dstShim error:nil];
+      [machOs addObject:dstShim];
+    }
+  }
 
   // Sign the loose code first (bundles sign their own executable), then the bundles from the deepest up: a bundle's
   // seal covers what it contains. Bundles at one depth don't contain each other, so those sign in parallel.

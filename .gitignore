@@ -9,3 +9,17 @@
 out/
 .DS_Store
 *.dSYM/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python and Bot artifacts
+__pycache__/
+*.py[cod]
+downloads/
+*.ipa
+defile/
+vendor/
+
